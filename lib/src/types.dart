@@ -9,7 +9,8 @@ enum Strictness {
   /// Adds milder insults (idiot, murkha, sala…). The default.
   standard,
 
-  /// Adds stems that also start ordinary words or names (rand → Randip, cond → condition).
+  /// Adds words and stems that are also ordinary words (damn, cum, rand). Known names and words, like Randip and
+  /// condition, stay allowed.
   strict,
 }
 

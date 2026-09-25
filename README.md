@@ -61,7 +61,7 @@ result.censor();       // 'you ****'
 ```dart
 findProfanity('fuck muji मुजी', languages: [Language.romanized]);     // ['muji']
 containsProfanity('you idiot', strictness: Strictness.lenient);      // false
-findProfanity('terms and conditions', strictness: Strictness.strict); // ['conditions']
+findProfanity('damn it', strictness: Strictness.strict); // ['damn']
 
 // Build a filter once for fixed options.
 final filter = ProfanityFilter(languages: [Language.romanized], strictness: Strictness.lenient);
@@ -70,8 +70,9 @@ filter.censor('fuck muji');   // 'fuck ****'
 
 - `languages`: any of `Language.english`, `Language.romanized`, `Language.devanagari`. Default: all three.
 - `strictness`: `Strictness.lenient` (severe words only), `Strictness.standard` (the default; adds milder insults like
-  `idiot`, `murkha`) or `Strictness.strict` (adds the stems `rand`, `cond`, `kand`, `lund`, which also hit words like
-  `Randip` and `conditions`).
+  `idiot`, `murkha`) or `Strictness.strict` (adds entries that are also ordinary words, like `damn`, and the stems
+  `rand`, `cond`, `kand`, `lund`; names they would hit, like `Randip`, are on a built-in allow list).
+- `extraWords`: more words to flag. `allowWords`: words never to flag, such as names on your site.
 
 ## API
 
@@ -82,10 +83,10 @@ filter.censor('fuck muji');   // 'fuck ****'
 | `findProfanityMatches(text)` | `List<ProfanityMatch>` | Every occurrence with its position, sorted by position. |
 | `censor(text, {mask, replace})` | `String` | The text with each match masked. `mask` defaults to `'*'`. |
 | `check(text)` | `ProfanityCheck` | Scans once: `text`, `hasProfanity`, `words`, `matches`, `censor()`. |
-| `ProfanityFilter({languages, strictness})` | | A filter with the same methods, built once for fixed options. |
+| `ProfanityFilter({languages, strictness, extraWords, allowWords})` | | A filter with the same methods, built once for fixed options. |
 | `tokenize(text)` | `List<String>` | The tokens the matcher sees. Useful for debugging. |
 
-Every function also takes `languages` and `strictness`. The word lists are in a separate library:
+Every function also takes `languages`, `strictness`, `extraWords` and `allowWords`. The word lists are in a separate library:
 
 ```dart
 import 'package:no_nepali_profanity/lexicon.dart' as lexicon;

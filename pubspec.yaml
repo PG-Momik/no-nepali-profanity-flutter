@@ -1,6 +1,6 @@
 name: no_nepali_profanity
 description: Profanity matcher for English, Romanized Nepali and Devanagari Nepali. Catches leetspeak, stretched and spelled-out letters and Nepali postpositions, without flagging real names.
-version: 0.1.0
+version: 0.2.0
 homepage: https://mukhxadnahunna.com/flutter/
 repository: https://github.com/PG-Momik/no-nepali-profanity-flutter
 issue_tracker: https://github.com/PG-Momik/no-nepali-profanity-flutter/issues

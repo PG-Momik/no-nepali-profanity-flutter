@@ -4,15 +4,27 @@ import 'lexicon.dart';
 import 'types.dart';
 
 const Map<String, String> _leet = {
-  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '@': 'a', r'$': 's', //
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b', '9': 'g', '@': 'a', r'$': 's', '€': 'e', //
 };
+
+// Cyrillic and Greek letters that look like Latin ones, so "fuсk" with a Cyrillic с still reads as "fuck".
+const Map<String, String> _confusables = {
+  'а': 'a', 'в': 'b', 'е': 'e', 'ё': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', //
+  'у': 'y', 'х': 'x', 'ѕ': 's', 'і': 'i', 'ї': 'i', 'ј': 'j', 'ԁ': 'd', 'α': 'a', 'β': 'b', 'ε': 'e', 'ι': 'i', //
+  'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', //
+};
+
+// Characters that can split a word without a space: "sh.it", "fu-ck", "b_i_tch".
+final RegExp _glue = RegExp(r"^[._\-~'`]+$");
+const int _maxGluedPieces = 6;
+const int _maxGluedLength = 12;
 
 // Words shorter than this after collapsing repeated letters must match exactly, so "as" never matches "ass".
 const int _minCollapse = 4;
 
 final RegExp _devanagari = RegExp(r'[ऀ-ॿ]');
 final RegExp _zeroWidth = RegExp(r'^[​-‍⁠﻿]$');
-final RegExp _leetChar = RegExp(r'[0-9@$]');
+final RegExp _mark = RegExp(r'\p{M}', unicode: true);
 // "!" stands for "i" only between two letters or digits, so a sentence-final "!" stays punctuation.
 final RegExp _bangForI = RegExp(r'(?<=[\p{L}\p{N}])!+(?=[\p{L}\p{N}])', unicode: true);
 final RegExp _tokenRun = RegExp(r'[\p{L}\p{M}*]+', unicode: true);
@@ -30,13 +42,20 @@ String _collapse(String s) => s.replaceAllMapped(_repeated, (m) => m[1]!);
 
 String _squeeze(String s) => s.replaceAllMapped(_tripled, (m) => '${m[1]}${m[1]}');
 
+// Folds the spellings of छ, chh and x, into x. Romanized entries and tokens are both folded before they're compared,
+// so xakka matches chhakka. It also keeps छ apart from च once letters are collapsed, so chhod ("leave") no longer
+// matches the stem chod.
+String _romanize(String s) => _squeeze(s).replaceAll('chh', 'x');
+
 String _normalizeChar(String ch) {
   if (_zeroWidth.hasMatch(ch)) return '';
   if (_isDevanagari(ch)) {
     // Decompose so a precomposed nukta letter (ऩ) loses its nukta too, and fold chandrabindu into anusvara.
     return unorm.nfd(ch).replaceAll('़', '').replaceAll('ँ', 'ं');
   }
-  return unorm.nfkc(ch).toLowerCase().replaceAllMapped(_leetChar, (m) => _leet[m[0]] ?? m[0]!);
+  // Accents are removed, so "fück" reads as "fuck".
+  final folded = unorm.nfd(unorm.nfkc(ch).toLowerCase()).replaceAll(_mark, '');
+  return folded.split('').map((c) => _leet[c] ?? _confusables[c] ?? c).join();
 }
 
 /// Normalized text, plus the span of the original text that each normalized UTF-16 unit came from, so a match
@@ -95,42 +114,82 @@ String _normalizeText(String s) => _normalize(s).text;
 class _Tables {
   final Set<String> latinExact;
   final Set<String> latinCollapsed;
-  final List<String> latinWords;
   final List<String> latinStems;
+  final Set<String> romanExact;
+  final Set<String> romanCollapsed;
+  final List<String> romanStems;
+
+  /// Every Latin word and stem, unfolded, for wildcard tokens.
+  final List<String> wildWords;
+  final List<String> wildStems;
+  final List<String> infixes;
+
+  /// The infixes with no doubled letter, which are also looked for in the collapsed token.
+  final List<String> plainInfixes;
+  final Set<String> allowed;
   final Set<String> devWords;
   final List<String> devStems;
+  final Set<String> devAllowed;
   final List<RegExp> phrases;
 
   _Tables({
     required this.latinExact,
     required this.latinCollapsed,
-    required this.latinWords,
     required this.latinStems,
+    required this.romanExact,
+    required this.romanCollapsed,
+    required this.romanStems,
+    required this.wildWords,
+    required this.wildStems,
+    required this.infixes,
+    required this.plainInfixes,
+    required this.allowed,
     required this.devWords,
     required this.devStems,
+    required this.devAllowed,
     required this.phrases,
   });
 }
 
-_Tables _buildTables(Set<Language> languages, Strictness strictness) {
-  List<String> active(List<LexiconEntry> entries, {required bool devanagari}) => [
-        for (final e in entries)
-          if (languages.contains(e.language) &&
-              e.strictness.index <= strictness.index &&
-              (e.language == Language.devanagari) == devanagari)
-            _normalizeText(e.text),
+_Tables _buildTables(
+    Set<Language> languages, Strictness strictness, Iterable<String> extraWordList, Iterable<String> allowWordList) {
+  List<String> active(List<LexiconEntry> entries, Language language) => [
+        if (languages.contains(language))
+          for (final e in entries)
+            if (e.language == language && e.strictness.index <= strictness.index) _normalizeText(e.text),
+      ];
+  List<String> normalizeList(Iterable<String> words) => [
+        for (final w in words)
+          if (w.trim().isNotEmpty) _normalizeText(w.trim()),
       ];
 
-  final latinWords = active(words, devanagari: false);
+  final extraWords = normalizeList(extraWordList);
+  final allowWords = normalizeList([...allowed, ...allowWordList]);
+
+  // Extra words count as English: matched as they are, without the Romanized spelling folds.
+  final englishWords = [...active(words, Language.english), ...extraWords.where((w) => !_isDevanagari(w))];
+  final romanWords = active(words, Language.romanized);
+  final englishStems = active(stems, Language.english);
+  final romanStems = active(stems, Language.romanized);
+  final infixList = active(infixes, Language.english).map(_squeeze).toList();
+  final romanFolded = romanWords.map(_romanize).toList();
 
   return _Tables(
-    latinExact: latinWords.map(_squeeze).toSet(),
-    latinCollapsed: latinWords.map(_collapse).where((w) => w.length >= _minCollapse).toSet(),
-    latinWords: latinWords.map(_squeeze).toList(),
-    latinStems: active(stems, devanagari: false).map(_collapse).toList(),
-    devWords: active(words, devanagari: true).toSet(),
-    devStems: active(stems, devanagari: true),
-    phrases: [...active(phrases, devanagari: false), ...active(phrases, devanagari: true)].map((p) {
+    latinExact: englishWords.map(_squeeze).toSet(),
+    latinCollapsed: englishWords.map(_collapse).where((w) => w.length >= _minCollapse).toSet(),
+    latinStems: englishStems.map(_collapse).toList(),
+    romanExact: romanFolded.toSet(),
+    romanCollapsed: romanFolded.map(_collapse).where((w) => w.length >= _minCollapse).toSet(),
+    romanStems: romanStems.map((s) => _collapse(_romanize(s))).toList(),
+    wildWords: [...englishWords, ...romanWords].map(_squeeze).toList(),
+    wildStems: [...englishStems, ...romanStems].map(_collapse).toList(),
+    infixes: infixList,
+    plainInfixes: infixList.where((i) => _collapse(i) == i).toList(),
+    allowed: allowWords.where((w) => !_isDevanagari(w)).map(_squeeze).toSet(),
+    devWords: {...active(words, Language.devanagari), ...extraWords.where(_isDevanagari)},
+    devStems: active(stems, Language.devanagari),
+    devAllowed: allowWords.where(_isDevanagari).toSet(),
+    phrases: [for (final l in Language.values) ...active(phrases, l)].map((p) {
       final body = p.trim().split(RegExp(r'\s+')).map(RegExp.escape).join(r'\s+');
       return RegExp('(?:^|[^\\p{L}\\p{N}])($body)(?![\\p{L}\\p{N}])', unicode: true, caseSensitive: false);
     }).toList(),
@@ -160,8 +219,8 @@ bool _wildcardTokenMatches(_Tables tables, String token) {
   ];
 
   return forms.any((f) =>
-      tables.latinWords.any((w) => _wildcardEquals(f, w)) ||
-      tables.latinStems.any((stem) => f.length >= stem.length && _wildcardEquals(f.substring(0, stem.length), stem)));
+      tables.wildWords.any((w) => _wildcardEquals(f, w)) ||
+      tables.wildStems.any((stem) => f.length >= stem.length && _wildcardEquals(f.substring(0, stem.length), stem)));
 }
 
 bool _latinTokenMatches(_Tables tables, String token) {
@@ -173,12 +232,21 @@ bool _latinTokenMatches(_Tables tables, String token) {
     }
   }
 
+  if (candidates.any((t) => tables.allowed.contains(_squeeze(t)))) return false;
+
   return candidates.any((t) {
     final squeezed = _squeeze(t);
     final collapsed = _collapse(t);
+    final roman = _romanize(t);
+    final romanCollapsed = _collapse(roman);
     return tables.latinExact.contains(squeezed) ||
         (collapsed.length >= _minCollapse && tables.latinCollapsed.contains(collapsed)) ||
         tables.latinStems.any(collapsed.startsWith) ||
+        tables.romanExact.contains(roman) ||
+        (romanCollapsed.length >= _minCollapse && tables.romanCollapsed.contains(romanCollapsed)) ||
+        tables.romanStems.any(romanCollapsed.startsWith) ||
+        tables.infixes.any(squeezed.contains) ||
+        tables.plainInfixes.any(collapsed.contains) ||
         _wildcardTokenMatches(tables, t);
   });
 }
@@ -192,6 +260,7 @@ bool _devanagariTokenMatches(_Tables tables, String token) {
     }
   }
 
+  if (candidates.any(tables.devAllowed.contains)) return false;
   return candidates.any((t) => tables.devWords.contains(t) || tables.devStems.any(t.startsWith));
 }
 
@@ -232,6 +301,36 @@ List<_Span> _tokenSpans(_Normalized n) {
   return tokens;
 }
 
+/// Runs of Latin letters split only by glue characters, read as one word. A run is joined only if one of its pieces
+/// is three letters or fewer and the joined word is at most 12 letters, so "shital.shrestha" in an email address
+/// stays two words.
+List<_Span> _gluedSpans(_Normalized n) {
+  final runs = [
+    for (final m in _tokenRun.allMatches(n.text))
+      if (!_isDevanagari(m[0]!)) m,
+  ];
+
+  final spans = <_Span>[];
+  var group = <RegExpMatch>[];
+  void flush() {
+    final length = group.fold<int>(0, (sum, r) => sum + r[0]!.length);
+    if (group.length >= 2 &&
+        group.length <= _maxGluedPieces &&
+        length <= _maxGluedLength &&
+        group.any((r) => r[0]!.length <= 3)) {
+      spans.add(_Span(group.map((r) => r[0]!).join(), n.starts[group.first.start], n.ends[group.last.end - 1]));
+    }
+    group = [];
+  }
+
+  for (final r in runs) {
+    if (group.isNotEmpty && !_glue.hasMatch(n.text.substring(group.last.end, r.start))) flush();
+    group.add(r);
+  }
+  flush();
+  return spans;
+}
+
 /// Every match, words first and then phrases, in the order found.
 List<ProfanityMatch> _scan(_Tables tables, String text) {
   if (text.isEmpty) return [];
@@ -246,6 +345,12 @@ List<ProfanityMatch> _scan(_Tables tables, String text) {
     if (_isDevanagari(t.value) ? _devanagariTokenMatches(tables, t.value) : _latinTokenMatches(tables, t.value)) {
       found.add(match(t.value, t.start, t.end));
     }
+  }
+
+  // A glued word is only read joined when none of its pieces matched on its own.
+  for (final g in _gluedSpans(n)) {
+    if (found.any((m) => m.start < g.end && g.start < m.end)) continue;
+    if (_latinTokenMatches(tables, g.value)) found.add(match(g.value, g.start, g.end));
   }
 
   for (final re in tables.phrases) {
@@ -366,9 +471,15 @@ class ProfanityCheck {
 class ProfanityFilter {
   final _Tables _tables;
 
-  /// A filter for the given [languages] (all three by default) and [strictness].
-  ProfanityFilter({Iterable<Language>? languages, Strictness strictness = Strictness.standard})
-      : _tables = _buildTables((languages ?? Language.values).toSet(), strictness);
+  /// A filter for the given [languages] (all three by default) and [strictness]. [extraWords] are more words to
+  /// flag, at every strictness, matched like the built-in words: leetspeak, stretching, postpositions.
+  /// [allowWords] are words never to flag, such as names on your site, also with a postposition.
+  ProfanityFilter({
+    Iterable<Language>? languages,
+    Strictness strictness = Strictness.standard,
+    Iterable<String> extraWords = const [],
+    Iterable<String> allowWords = const [],
+  }) : _tables = _buildTables((languages ?? Language.values).toSet(), strictness, extraWords, allowWords);
 
   /// Scans the text once. Use the result to check for profanity and to censor it, e.g. `check(text).censor()`.
   ProfanityCheck check(String text) => ProfanityCheck._(text, _scan(_tables, text));
@@ -389,36 +500,58 @@ class ProfanityFilter {
 
 final Map<String, ProfanityFilter> _filterCache = {};
 
-ProfanityFilter _cachedFilter(Iterable<Language>? languages, Strictness strictness) {
+ProfanityFilter _cachedFilter(
+    Iterable<Language>? languages, Strictness strictness, Iterable<String> extraWords, Iterable<String> allowWords) {
   final langs = (languages ?? Language.values).map((l) => l.name).toSet().toList()..sort();
+  // The word lists are joined with a character no word contains.
+  final key = [strictness.name, langs.join(','), extraWords.join('\u0000'), allowWords.join('\u0000')].join('|');
   return _filterCache.putIfAbsent(
-      '${strictness.name}|${langs.join(',')}', () => ProfanityFilter(languages: languages, strictness: strictness));
+      key,
+      () => ProfanityFilter(
+          languages: languages, strictness: strictness, extraWords: extraWords, allowWords: allowWords));
 }
 
 /// Scans the text once. Use the result to check for profanity and to censor it, e.g. `check(text).censor()`.
-ProfanityCheck check(String text, {Iterable<Language>? languages, Strictness strictness = Strictness.standard}) =>
-    _cachedFilter(languages, strictness).check(text);
+ProfanityCheck check(String text,
+        {Iterable<Language>? languages,
+        Strictness strictness = Strictness.standard,
+        Iterable<String> extraWords = const [],
+        Iterable<String> allowWords = const []}) =>
+    _cachedFilter(languages, strictness, extraWords, allowWords).check(text);
 
 /// Whether the text contains any profanity.
-bool containsProfanity(String text, {Iterable<Language>? languages, Strictness strictness = Strictness.standard}) =>
-    _cachedFilter(languages, strictness).containsProfanity(text);
+bool containsProfanity(String text,
+        {Iterable<Language>? languages,
+        Strictness strictness = Strictness.standard,
+        Iterable<String> extraWords = const [],
+        Iterable<String> allowWords = const []}) =>
+    _cachedFilter(languages, strictness, extraWords, allowWords).containsProfanity(text);
 
 /// The normalized words found, without duplicates, e.g. `['fuck', 'shit']` for "f.u.c.k sh1t".
-List<String> findProfanity(String text, {Iterable<Language>? languages, Strictness strictness = Strictness.standard}) =>
-    _cachedFilter(languages, strictness).findProfanity(text);
+List<String> findProfanity(String text,
+        {Iterable<Language>? languages,
+        Strictness strictness = Strictness.standard,
+        Iterable<String> extraWords = const [],
+        Iterable<String> allowWords = const []}) =>
+    _cachedFilter(languages, strictness, extraWords, allowWords).findProfanity(text);
 
 /// Like [findProfanity], but returns every occurrence with its position in the input, sorted by position.
 List<ProfanityMatch> findProfanityMatches(String text,
-        {Iterable<Language>? languages, Strictness strictness = Strictness.standard}) =>
-    _cachedFilter(languages, strictness).findProfanityMatches(text);
+        {Iterable<Language>? languages,
+        Strictness strictness = Strictness.standard,
+        Iterable<String> extraWords = const [],
+        Iterable<String> allowWords = const []}) =>
+    _cachedFilter(languages, strictness, extraWords, allowWords).findProfanityMatches(text);
 
 /// The text with every match masked, e.g. "you muji" → "you ****".
 String censor(String text,
         {Iterable<Language>? languages,
         Strictness strictness = Strictness.standard,
+        Iterable<String> extraWords = const [],
+        Iterable<String> allowWords = const [],
         String mask = '*',
         Replacer? replace}) =>
-    _cachedFilter(languages, strictness).censor(text, mask: mask, replace: replace);
+    _cachedFilter(languages, strictness, extraWords, allowWords).censor(text, mask: mask, replace: replace);
 
 /// The tokens the matcher sees. Useful for debugging why a word is or isn't caught.
 List<String> tokenize(String text) => text.isEmpty ? [] : _tokenSpans(_normalize(text)).map((t) => t.value).toList();

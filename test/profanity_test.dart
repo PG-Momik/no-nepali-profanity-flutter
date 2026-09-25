@@ -46,6 +46,23 @@ void main() {
       'Latin phrase': 'khatako choro',
       'Devanagari phrase': 'राण्डीको बान',
       'spelling variant with -ey': 'yo khatey payment app kahiley chaley po',
+      'an English slur': 'what a faggot',
+      'a short English slur': 'fag',
+      'an English slur in leetspeak': 'f@ggot',
+      'an English compound with a stem': 'shitface',
+      'an English compound in leetspeak with !': 'sh!tf@ce',
+      'a root inside a longer word': 'dumbfuck',
+      'a root inside a joined phrase': 'sonofabitch',
+      'x written for chh': 'xakka',
+      'x written for chh, stretched': 'xaaakka',
+      'x written for ch': 'maxikne',
+      'a word split by punctuation': 'sh.it happens',
+      'a word split by a hyphen': 'fu-ck off',
+      'a word split with one letter on its own': 'f-ck off',
+      'accented letters': 'fück',
+      'a Cyrillic look-alike letter': 'fu\u0441k',
+      '9 for g': 'ni99er',
+      '8 for b': '8itch',
     };
     catches.forEach((label, text) {
       test('catches $label', () => expect(containsProfanity(text), isTrue));
@@ -95,6 +112,35 @@ void main() {
       'lato keta',
       'फोहोर पानी',
       'लाटो केटा',
+      // chh (छ) is kept apart from ch (च)
+      'chhodnu parchha',
+      'xodnu parchha',
+      'chhut paunu bhayo',
+      // Words and names on the allow list, or that only contain a listed word
+      'Shital Shrestha',
+      'Shitijko ghar',
+      'Nigeria and Niger',
+      'he sniggered',
+      'Scunthorpe United',
+      'Harshita and Nishita',
+      'shiitake mushrooms',
+      'a niggardly tip',
+      'Shiite and Sunni',
+      'a cutwater and sweetwater',
+      'the dog\'s muzzle',
+      'sticky goo',
+      'a looser fit',
+      'fagotto solo',
+      // Punctuation that isn't hiding a word
+      'e.g. the i.e. case',
+      'shital.shrestha@example.com',
+      'self-conscious and well-known',
+      'don\'t go',
+      // Ordinary words the Romanized spelling folds must not change
+      'the sale is on',
+      'good food',
+      'book a shoot',
+      'the 2026 census',
     ];
     for (final text in clean) {
       test('does not flag "$text"', () => expect(findProfanity(text), isEmpty));
@@ -147,10 +193,39 @@ void main() {
       expect(containsProfanity('Randip Thapa'), isFalse);
     });
 
-    test('strict adds the stems that also match ordinary words and names', () {
+    test('strict adds the stems and words that also match ordinary words', () {
       expect(findProfanity('randikoban', strictness: Strictness.strict), ['randikoban']);
-      expect(findProfanity('terms and conditions', strictness: Strictness.strict), ['conditions']);
-      expect(findProfanity('Randip Thapa', strictness: Strictness.strict), ['randip']);
+      expect(findProfanity('damn it', strictness: Strictness.strict), ['damn']);
+      expect(findProfanity('damn it'), isEmpty);
+    });
+
+    test('strict still leaves the allow list alone', () {
+      for (final text in [
+        'Randip Thapa',
+        'Randipko class',
+        'terms and conditions',
+        'a random conductor',
+        'Kandel sir'
+      ]) {
+        expect(findProfanity(text, strictness: Strictness.strict), isEmpty, reason: text);
+      }
+    });
+  });
+
+  group('extraWords and allowWords', () {
+    test('flags extra words, with leetspeak and postpositions', () {
+      final filter = ProfanityFilter(extraWords: ['spammer', 'ठग']);
+      expect(filter.findProfanity('sp4mmer'), ['spammer']);
+      expect(filter.findProfanity('spammerko kura'), ['spammerko']);
+      expect(filter.findProfanity('ठगको'), ['ठगको']);
+      expect(findProfanity('spammer ठग'), isEmpty);
+    });
+
+    test('never flags allowed words, with or without a postposition', () {
+      expect(findProfanity('idiot', allowWords: ['idiot']), isEmpty);
+      expect(findProfanity('mujiko', allowWords: ['muji']), isEmpty);
+      expect(findProfanity('मुजीको', allowWords: ['मुजी']), isEmpty);
+      expect(findProfanity('idiot muji', allowWords: ['idiot']), ['muji']);
     });
   });
 
@@ -202,6 +277,8 @@ void main() {
       'f*ck and *sh*t*': '**** and ******',
       'muji muji': '**** ****',
       'you 😀 muji 😀': 'you 😀 **** 😀',
+      'sh.it happens': '***** happens',
+      'sh!tf@ce': '********',
     };
     masks.forEach((text, expected) {
       test('masks "$text"', () => expect(censor(text), expected));
@@ -232,7 +309,7 @@ void main() {
     test('respects the filter options', () {
       expect(censor('fuck muji', languages: [Language.romanized]), 'fuck ****');
       expect(censor('you idiot', strictness: Strictness.lenient), 'you idiot');
-      expect(ProfanityFilter(strictness: Strictness.strict).censor('Randip Thapa'), '****** Thapa');
+      expect(ProfanityFilter(strictness: Strictness.strict).censor('damn Randip'), '**** Randip');
     });
 
     test('rejects an empty mask', () => expect(() => censor('muji', mask: ''), throwsArgumentError));

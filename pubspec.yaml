@@ -3,7 +3,7 @@ description: Profanity matcher for English, Romanized Nepali and Devanagari Nepa
 version: 0.1.0
 homepage: https://mukhxadnahunna.com/flutter/
 repository: https://github.com/PG-Momik/no-nepali-profanity-flutter
-issue_tracker: https://github.com/PG-Momik/no-nepali-profanity/issues
+issue_tracker: https://github.com/PG-Momik/no-nepali-profanity-flutter/issues
 
 environment:
   sdk: ^3.0.0

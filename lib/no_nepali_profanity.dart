@@ -1,7 +1,7 @@
 /// A small profanity matcher for English, Romanized (Latin) Nepali and Devanagari Nepali, plus the Hindi slang
 /// common in Nepal.
 ///
-/// Built for moderating user-written text — names, comments, reviews — on Nepali sites, where false positives on
+/// Built for moderating user-written text (names, comments, reviews) on Nepali sites, where false positives on
 /// real names are more damaging than a missed swear. It uses the same word lists and matching rules as the
 /// JavaScript package, so a piece of text gets the same result in every language.
 ///
